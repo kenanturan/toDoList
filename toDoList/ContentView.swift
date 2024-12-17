@@ -10,20 +10,67 @@ import CoreData
 
 struct ContentView: View {
     @Environment(\.managedObjectContext) private var viewContext
+    @State private var showingEditAlert = false
+    @State private var itemToEdit: Item?
+    @State private var newTitle = ""
+    @State private var searchText = ""
 
     @FetchRequest(
         sortDescriptors: [NSSortDescriptor(keyPath: \Item.timestamp, ascending: true)],
         animation: .default)
     private var items: FetchedResults<Item>
+    
+    var filteredItems: [Item] {
+        if searchText.isEmpty {
+            return Array(items)
+        }
+        return items.filter { item in
+            (item.title ?? "").localizedCaseInsensitiveContains(searchText) ||
+            (item.note ?? "").localizedCaseInsensitiveContains(searchText)
+        }
+    }
 
     var body: some View {
         NavigationView {
             List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp!, formatter: itemFormatter)")
-                    } label: {
-                        Text(item.timestamp!, formatter: itemFormatter)
+                SearchBar(text: $searchText)
+                    .textCase(nil)
+                
+                ForEach(filteredItems, id: \.self) { item in
+                    NavigationLink(destination: DetailView(item: item)) {
+                        VStack(alignment: .leading) {
+                            Text(item.title ?? "Yeni Not")
+                                .font(.headline)
+                            Text(item.timestamp ?? Date(), formatter: itemFormatter)
+                                .font(.caption)
+                            if let reminderDate = item.reminderDate {
+                                HStack {
+                                    Image(systemName: "bell.fill")
+                                        .foregroundColor(.blue)
+                                    Text(reminderDate, formatter: itemFormatter)
+                                        .font(.caption)
+                                }
+                            }
+                        }
+                    }
+                    .swipeActions(edge: .trailing) {
+                        Button {
+                            itemToEdit = item
+                            newTitle = item.title ?? "Yeni Not"
+                            showingEditAlert = true
+                        } label: {
+                            Label("Düzenle", systemImage: "pencil")
+                        }
+                        .tint(.blue)
+                        
+                        Button(role: .destructive) {
+                            withAnimation {
+                                viewContext.delete(item)
+                                try? viewContext.save()
+                            }
+                        } label: {
+                            Label("Sil", systemImage: "trash")
+                        }
                     }
                 }
                 .onDelete(perform: deleteItems)
@@ -34,11 +81,20 @@ struct ContentView: View {
                 }
                 ToolbarItem {
                     Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
+                        Label("Not Ekle", systemImage: "plus")
                     }
                 }
             }
-            Text("Select an item")
+            .alert("Başlığı Düzenle", isPresented: $showingEditAlert) {
+                TextField("Başlık", text: $newTitle)
+                Button("İptal", role: .cancel) { }
+                Button("Kaydet") {
+                    if let item = itemToEdit {
+                        item.title = newTitle
+                        try? viewContext.save()
+                    }
+                }
+            }
         }
     }
 
@@ -46,31 +102,41 @@ struct ContentView: View {
         withAnimation {
             let newItem = Item(context: viewContext)
             newItem.timestamp = Date()
-
-            do {
-                try viewContext.save()
-            } catch {
-                // Replace this implementation with code to handle the error appropriately.
-                // fatalError() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
-                let nsError = error as NSError
-                fatalError("Unresolved error \(nsError), \(nsError.userInfo)")
-            }
+            newItem.title = "Yeni Not"
+            try? viewContext.save()
         }
     }
 
     private func deleteItems(offsets: IndexSet) {
         withAnimation {
             offsets.map { items[$0] }.forEach(viewContext.delete)
+            try? viewContext.save()
+        }
+    }
+}
 
-            do {
-                try viewContext.save()
-            } catch {
-                // Replace this implementation with code to handle the error appropriately.
-                // fatalError() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
-                let nsError = error as NSError
-                fatalError("Unresolved error \(nsError), \(nsError.userInfo)")
+struct SearchBar: View {
+    @Binding var text: String
+
+    var body: some View {
+        HStack {
+            Image(systemName: "magnifyingglass")
+                .foregroundColor(.gray)
+            TextField("Ara...", text: $text)
+                .textFieldStyle(PlainTextFieldStyle())
+            if !text.isEmpty {
+                Button(action: {
+                    text = ""
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.gray)
+                }
             }
         }
+        .padding(8)
+        .background(Color(.systemGray6))
+        .cornerRadius(10)
+        .padding(.horizontal)
     }
 }
 
